@@ -963,6 +963,7 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
+    #[allow(unused)]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         info!("Loading kernel");
         let cmdline = self.get_cmdline()?;
@@ -1685,6 +1686,7 @@ impl Vm {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let mut hob_offset = None;
+        let mut payload_info = None;
         for section in sections {
             info!("Populating TDVF Section: {:x?}", section);
             match section.r#type {
@@ -1702,6 +1704,36 @@ impl Vm {
                 }
                 TdvfSectionType::TdHob => {
                     hob_offset = Some(section.address);
+                }
+                TdvfSectionType::Payload => {
+                    let size: usize = self.kernel.as_ref().unwrap()
+                        .seek(SeekFrom::End(0))
+                        .map_err(|_| Error::InitramfsLoad)?
+                        .try_into()
+                        .unwrap();
+                    self.kernel.as_ref().unwrap()
+                        .seek(SeekFrom::Start(0))
+                        .map_err(|_| Error::InitramfsLoad)?;
+                    mem.read_from(
+                        GuestAddress(section.address),
+                        &mut self.kernel.as_ref().unwrap(),
+                        size,
+                    )
+                    .unwrap();
+                    payload_info = Some(PayloadInfo {
+                        image_type: 1,
+                        entry_point: 0,
+                    });
+                }
+                TdvfSectionType::PayloadParam => {
+                    let cmdline = self.get_cmdline().unwrap();
+
+                    info! ("cmdline write in PayloadParam: {}\n", cmdline.as_str());
+                    mem.write_slice (
+                        cmdline.as_str().as_bytes(),
+                        GuestAddress(section.address),
+                    )
+                    .unwrap();
                 }
                 _ => {}
             }
@@ -1801,6 +1833,12 @@ impl Vm {
         for region in vmm_data_regions {
             hob.add_td_vmm_data(&mem, *region)
                 .map_err(Error::PopulateHob)?;
+        }
+
+        // If there is a payload section found in TDVF metadata, put the
+        // payload info in the HOB.
+        if let Some(payload) = payload_info {
+            hob.add_payload(&mem, payload).map_err(Error::PopulateHob)?;
         }
 
         hob.finish(&mem).map_err(Error::PopulateHob)?;
@@ -1910,12 +1948,16 @@ impl Vm {
         let new_state = VmState::Running;
         current_state.valid_transition(new_state)?;
 
+        #[cfg(not(feature = "tdx"))]
         // Load kernel if configured
         let entry_point = if self.kernel.as_ref().is_some() {
             Some(self.load_kernel()?)
         } else {
             None
         };
+
+        #[cfg(feature = "tdx")]
+        let entry_point = None;
 
         // The initial TDX configuration must be done before the vCPUs are
         // created

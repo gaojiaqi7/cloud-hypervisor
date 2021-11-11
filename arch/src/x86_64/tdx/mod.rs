@@ -51,6 +51,9 @@ pub enum TdvfSectionType {
     Cfv,
     TdHob,
     TempMem,
+    PermMem,
+    Payload,
+    PayloadParam,
     Reserved = 0xffffffff,
 }
 
@@ -244,6 +247,22 @@ struct TdVmmData {
 }
 unsafe impl ByteValued for TdVmmData {}
 
+#[repr(C, packed)]
+#[derive(Copy, Clone, Default, Debug)]
+pub struct PayloadInfo {
+    pub image_type: u32,
+    pub entry_point: u64,
+}
+unsafe impl ByteValued for PayloadInfo {}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct TdPayload {
+    guid_type: HobGuidType,
+    payload_info: PayloadInfo,
+}
+unsafe impl ByteValued for TdPayload {}
+
 pub struct TdHob {
     start_offset: u64,
     current_offset: u64,
@@ -403,6 +422,40 @@ impl TdHob {
         mem.write_obj(td_vmm_data, GuestAddress(self.current_offset))
             .map_err(TdvfError::GuestMemoryWriteHob)?;
         self.update_offset::<TdVmmData>();
+        Ok(())
+    }
+
+    pub fn add_payload(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        payload_info: PayloadInfo,
+    ) -> Result<(), TdvfError> {
+        let payload = TdPayload {
+            guid_type : HobGuidType {
+                header: HobHeader {
+                    r#type: HobType::GuidExtension,
+                    length: std::mem::size_of::<TdPayload>() as u16,
+                    reserved: 0,
+                },
+                // HOB_PAYLOAD_INFO_GUID
+                // 0xb96fa412, 0x461f, 0x4be3, {0x8c, 0xd, 0xad, 0x80, 0x5a, 0x49, 0x7a, 0xc0
+                name: EfiGuid {
+                    data1: 0xb96f_a412,
+                    data2: 0x461f,
+                    data3: 0x4be3,
+                    data4: [0x8c, 0xd, 0xad, 0x80, 0x5a, 0x49, 0x7a, 0xc0],
+                },
+            },
+            payload_info,
+        };
+        info!(
+            "Writing HOB TD_PAYLOAD {:x} {:x?}",
+            self.current_offset, payload
+        );
+        mem.write_obj(payload, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<TdPayload>();
+
         Ok(())
     }
 }

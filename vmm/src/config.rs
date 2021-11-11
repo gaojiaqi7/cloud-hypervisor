@@ -1865,9 +1865,11 @@ impl VmConfig {
             if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
                 return Err(ValidationError::TdxNoCpuHotplug);
             }
-            if tdx_enabled && self.kernel.is_some() {
-                return Err(ValidationError::TdxKernelSpecified);
-            }
+            // **Kernel will be used by virtual BIOS direct boot in TDX,
+            // so commnet these out.
+            // if tdx_enabled && self.kernel.is_some() {
+            //     return Err(ValidationError::TdxKernelSpecified);
+            // }
         }
 
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty

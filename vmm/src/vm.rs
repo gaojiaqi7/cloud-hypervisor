@@ -1749,16 +1749,19 @@ impl Vm {
 
         // Add VMM specific data memory region to TdvfSections as TdHob type
         // to ensure the firmware won't ignore/reject the ranges.
-        for region in vmm_data_regions {
-            sorted_sections.push(TdvfSection {
-                data_offset: 0,
-                data_size: 0,
-                address: region.start_address,
-                size: region.length,
-                r#type: TdvfSectionType::TdHob,
-                attributes: 0,
-            });
-        }
+        //
+        // **Since TD-Shim spec defines another way to transfer ACPI tables,
+        // comment out these code in this moment.
+        // for region in vmm_data_regions {
+        //     sorted_sections.push(TdvfSection {
+        //         data_offset: 0,
+        //         data_size: 0,
+        //         address: region.start_address,
+        //         size: region.length,
+        //         r#type: TdvfSectionType::TdHob,
+        //         attributes: 0,
+        //     });
+        // }
 
         sorted_sections.sort_by_key(|section| section.address);
         sorted_sections.reverse();
@@ -1840,6 +1843,11 @@ impl Vm {
         if let Some(payload) = payload_info {
             hob.add_payload(&mem, payload).map_err(Error::PopulateHob)?;
         }
+
+        // Here is an example to transfer ACPI table from CH to TD-Shim
+        // through HOB according to the spec.
+        let mcfg = crate::acpi::create_mcfg_table();
+        hob.add_acpi(&mem, mcfg.as_slice()).map_err(Error::PopulateHob)?;
 
         hob.finish(&mem).map_err(Error::PopulateHob)?;
 

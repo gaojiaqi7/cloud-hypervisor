@@ -222,7 +222,7 @@ fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
     facp
 }
 
-fn create_mcfg_table() -> Sdt {
+pub fn create_mcfg_table() -> Sdt {
     let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes

@@ -263,6 +263,13 @@ struct TdPayload {
 }
 unsafe impl ByteValued for TdPayload {}
 
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct TdAcpi {
+    guid_type: HobGuidType,
+}
+unsafe impl ByteValued for TdAcpi {}
+
 pub struct TdHob {
     start_offset: u64,
     current_offset: u64,
@@ -275,6 +282,10 @@ fn align_hob(v: u64) -> u64 {
 impl TdHob {
     fn update_offset<T>(&mut self) {
         self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64)
+    }
+
+    fn update_offset_with_size(&mut self, size: usize) {
+        self.current_offset = align_hob(self.current_offset + size as u64)
     }
 
     pub fn start(offset: u64) -> TdHob {
@@ -456,6 +467,40 @@ impl TdHob {
             .map_err(TdvfError::GuestMemoryWriteHob)?;
         self.update_offset::<TdPayload>();
 
+        Ok(())
+    }
+
+    pub fn add_acpi(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        acpi_table: &[u8],
+    ) -> Result<(), TdvfError> {
+        let acpi_guid_hob = HobGuidType {
+            header: HobHeader {
+                r#type: HobType::GuidExtension,
+                length: (std::mem::size_of::<TdAcpi>() + acpi_table.len()) as u16,
+                reserved: 0,
+            },
+            // ACPI_TABLE_HOB_GUID
+            // 0x6a0c5870, 0xd4ed, 0x44f4, {0xa1, 0x35, 0xdd, 0x23, 0x8b, 0x6f, 0xc, 0x8d }
+            name: EfiGuid {
+                data1: 0x6a0c_5870,
+                data2: 0xd4ed,
+                data3: 0x44f4,
+                data4: [0xa1, 0x35, 0xdd, 0x23, 0x8b, 0x6f, 0xc, 0x8d],
+            },
+        };
+        info!(
+            "Writing HOB TD_ACPI {:x} {:x?}",
+            self.current_offset, acpi_guid_hob
+        );
+        mem.write_obj(acpi_guid_hob, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<HobGuidType>();
+
+        mem.write_slice(acpi_table, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset_with_size(acpi_table.len());
         Ok(())
     }
 }
